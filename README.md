@@ -137,6 +137,7 @@ int main() {
 
 
 ## OUTPUT
+![image](https://github.com/user-attachments/assets/1910ac63-3d5d-47f5-8eea-01249880f059)
 
 
 

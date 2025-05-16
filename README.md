@@ -1,11 +1,8 @@
-# Linux-IPC--Pipes
-Linux-IPC-Pipes
-
-
-# Ex03-Linux IPC - Pipes
+# Linux-IPC-Shared-memory
+Ex06-Linux IPC-Shared-memory
 
 # AIM:
-To write a C program that illustrate communication between two process using unnamed and named pipes
+To Write a C program that illustrates two processes communicating using shared memory.
 
 # DESIGN STEPS:
 
@@ -15,223 +12,132 @@ Navigate to any Linux environment installed on the system or installed inside a 
 
 ### Step 2:
 
-Write the C Program using Linux Process API - pipe(), fifo()
+Write the C Program using Linux Process API - Shared Memory
 
 ### Step 3:
 
-Testing the C Program for the desired output. 
+Execute the C Program for the desired output. 
+
+## Write a C program that illustrates two processes communicating using shared memory.
 
 # PROGRAM:
-
-## C Program that illustrate communication between two process using unnamed pipes using Linux API system calls
 ```
+//sem.c
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/types.h> 
-#include <sys/stat.h> 
-#include <string.h> 
-#include <fcntl.h> 
-#include <unistd.h>
-#include <sys/wait.h>
-
-void server(int rfd, int wfd); 
-void client(int wfd, int rfd); 
-
-int main() { 
-    int p1[2], p2[2]; 
-    pid_t pid;
-
-   
-    if (pipe(p1) == -1 || pipe(p2) == -1) {
-        perror("pipe failed");
-        exit(1);
-    }
-
-    pid = fork(); 
-    if (pid < 0) {
-        perror("fork failed");
-        exit(1);
-    }
-
-    if (pid == 0) { 
-      
-        close(p1[1]); 
-        close(p2[0]); 
-        server(p1[0], p2[1]); 
-        exit(0);
-    } 
-
-  
-    close(p1[0]); 
-    close(p2[1]);
-    client(p1[1], p2[0]); 
-    
-    wait(NULL); 
-    return 0; 
-} 
-
-void server(int rfd, int wfd) { 
-    int n; 
-    char fname[2000]; 
-    char buff[2000];
-
-  
-    n = read(rfd, fname, sizeof(fname) - 1);
-    if (n <= 0) {
-        perror("server: failed to read filename");
-        return;
-    }
-    fname[n] = '\0';
-
-    int fd = open(fname, O_RDONLY);
-    if (fd < 0) { 
-        char *errmsg = "can't open\n";
-        write(wfd, errmsg, strlen(errmsg));
-    } else { 
-        while ((n = read(fd, buff, sizeof(buff))) > 0) {
-            write(wfd, buff, n); 
-        }
-        close(fd);
-    } 
-}
-
-void client(int wfd, int rfd) {
-    int n; 
-    char fname[2000];
-    char buff[2000];
-
-    printf("Enter filename: ");
-    fflush(stdout);
-
-
-    if (scanf("%s", fname) != 1) {
-        perror("client: failed to read filename");
-        exit(1);
- 
-    write(wfd, fname, strlen(fname) + 1); 
-
-  
-    while ((n = read(rfd, buff, sizeof(buff))) > 0) {
-        write(1, buff, n); 
-    }
-}
-
-
-```
-
-## OUTPUT
-
-
-## C Program that illustrate communication between two process using named pipes using Linux API system calls
-```
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/shm.h>
+#include <sys/types.h>
 #include <sys/wait.h>
-#include <errno.h>
 
-#define FIFO_FILE "/tmp/my_fifo"
-#define FILE_NAME "hello.txt"
+#define TEXT_SZ 2048  // Shared memory size
 
-void server();
-void client();
+struct shared_use_st {
+    int written;  
+    char some_text[TEXT_SZ];
+};
 
 int main() {
-    pid_t pid;
+    int shmid;
+    void *shared_memory = (void *)0;
+    struct shared_use_st *shared_stuff;
 
- 
-    if (mkfifo(FIFO_FILE, 0666) == -1) {
-        if (errno != EEXIST) {
-            perror("mkfifo failed");
+    // Create shared memory
+    shmid = shmget((key_t)1234, sizeof(struct shared_use_st), 0666 | IPC_CREAT);
+    if (shmid == -1) {
+        fprintf(stderr, "shmget failed\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    // Print the shared memory ID in a predictable format
+    printf("Shared memory id = %d\n", shmid);
+    
+    // Attach to shared memory
+    shared_memory = shmat(shmid, (void *)0, 0);
+    if (shared_memory == (void *)-1) {
+        fprintf(stderr, "shmat failed\n");
+        exit(EXIT_FAILURE);
+    }
+    printf("Memory attached at %p\n", shared_memory);
+    
+    shared_stuff = (struct shared_use_st *)shared_memory;
+    shared_stuff->written = 0;
+
+    pid_t pid = fork();
+    
+    if (pid < 0) {
+        fprintf(stderr, "Fork failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pid == 0) {  // Child process (Consumer)
+        while (1) {
+            while (shared_stuff->written == 0) {
+                sleep(1); // Wait for producer
+            }
+
+            printf("Consumer received: %s", shared_stuff->some_text);
+
+            if (strncmp(shared_stuff->some_text, "end", 3) == 0) {
+                break;
+            }
+
+            shared_stuff->written = 0; // Reset for producer
+        }
+
+        // Detach shared memory
+        if (shmdt(shared_memory) == -1) {
+            fprintf(stderr, "shmdt failed\n");
             exit(EXIT_FAILURE);
         }
-    }
+        exit(EXIT_SUCCESS);
+    } else {  // Parent process (Producer)
+        char buffer[TEXT_SZ];
 
-    pid = fork();
+        while (1) {
+            printf("Enter Some Text: ");
+            fgets(buffer, TEXT_SZ, stdin);
 
-    if (pid > 0) {
-     
-        sleep(1);
-        server();
+            strncpy(shared_stuff->some_text, buffer, TEXT_SZ);
+            shared_stuff->written = 1;
+            printf(shared_stuff->some_text);
 
+            if (strncmp(buffer, "end", 3) == 0) {
+                break;
+            }
+
+            while (shared_stuff->written == 1) {
+                sleep(1); // Wait for consumer
+            }
+        }
+
+        // Wait for child process (consumer) to finish
         wait(NULL);
 
-    
-        unlink(FIFO_FILE);
-
-    } else if (pid == 0) {
-       
-        client();
-    } else {
-        perror("Fork failed");
-        exit(EXIT_FAILURE);
-    }
-
-    return 0;
-}
-
-
-void server() {
-    int fifo_fd, file_fd;
-    char buffer[1024];
-    ssize_t bytes_read;
-
-   
-    file_fd = open(FILE_NAME, O_RDONLY);
-    if (file_fd == -1) {
-        perror("Error opening hello.txt");
-        exit(EXIT_FAILURE);
-    }
-
- 
-    fifo_fd = open(FIFO_FILE, O_WRONLY);
-    if (fifo_fd == -1) {
-        perror("Error opening FIFO for writing");
-        close(file_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    
-    while ((bytes_read = read(file_fd, buffer, sizeof(buffer))) > 0) {
-        if (write(fifo_fd, buffer, bytes_read) == -1) {
-            perror("Error writing to FIFO");
-            break;
+        // Detach and remove shared memory
+        if (shmdt(shared_memory) == -1) {
+            fprintf(stderr, "shmdt failed\n");
+            exit(EXIT_FAILURE);
         }
-    }
-
-    close(file_fd);
-    close(fifo_fd);
-}
-
-void client() {
-    int fifo_fd;
-    char buffer[1024];
-    ssize_t bytes_read;
-
-
-    fifo_fd = open(FIFO_FILE, O_RDONLY);
-    if (fifo_fd == -1) {
-        perror("Error opening FIFO for reading");
-        exit(EXIT_FAILURE);
-    }
-
-    while ((bytes_read = read(fifo_fd, buffer, sizeof(buffer))) > 0) {
-        if (write(STDOUT_FILENO, buffer, bytes_read) == -1) {
-            perror("Error writing to stdout");
-            break;
+        
+        if (shmctl(shmid, IPC_RMID, 0) == -1) {
+            fprintf(stderr, "shmctl failed\n");
+            exit(EXIT_FAILURE);
         }
-    }
 
-    close(fifo_fd);
+        exit(EXIT_SUCCESS);
+    }
 }
+
 
 
 ```
+
+
+
 ## OUTPUT
+
 
 
 # RESULT:
